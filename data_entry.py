@@ -5,37 +5,7 @@ from datetime import date
 from typing import Callable
 from billing import BillingPreviewWindow
 
-def init_db():
-    conn = sqlite3.connect("description.db")
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS description_master (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            description TEXT UNIQUE NOT NULL,
-            customer_part_no TEXT,
-            sac_code TEXT,
-            rate REAL,
-            po_no TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-def insert_sample_data():
-    conn = sqlite3.connect("description.db")
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM description_master")
-    if cur.fetchone()[0] == 0:
-        cur.executemany("""
-            INSERT INTO description_master (description, customer_part_no, sac_code, rate, po_no)
-            VALUES (?, ?, ?, ?, ?)
-        """, [
-            ("Paint Coating", "PC-001", "998873", 100, "fc0001-1/12"),
-            ("Powder Coating", "PC-002", "998874", 120, "fc0000-1/12"),
-        ])
-        conn.commit()
-    conn.close()
-
+# init_db and insert_sample_data removed, will be handled by main_app.py via database_utils.py
 
 def get_all_descriptions():
     conn = sqlite3.connect("description.db")
@@ -103,12 +73,11 @@ class AddDescriptionPopup(tk.Toplevel):
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-class DataEntryPage(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("Delivery Challan - Data Entry")
-        self.geometry("800x700")
+class DataEntryPage(tk.Frame): # Inherit from tk.Frame
+    def __init__(self, master): # Add master argument
+        super().__init__(master) # Call super().__init__(master)
         self.configure(bg="#f0f0f0")
+        # Remove title and geometry, as it's now a frame
         self.create_widgets()
 
     def create_widgets(self):
@@ -206,9 +175,4 @@ class DataEntryPage(tk.Tk):
 
         BillingPreviewWindow(self, form_data, item_data)
 
-# At the bottom
-if __name__ == "__main__":
-    init_db()
-    insert_sample_data()
-    app = DataEntryPage()
-    app.mainloop()
+# Removed if __name__ == "__main__": block
