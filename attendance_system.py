@@ -1,22 +1,45 @@
+"""
+Manages the Attendance System UI for the ERP application.
+
+This module provides a Tkinter Frame (`AttendancePage`) that allows users to:
+- Select a date for attendance marking.
+- View a list of workers.
+- Mark each worker as "Present" or "Absent".
+- Enter punch-in and punch-out times for "Present" workers.
+- Save the attendance data for the selected date.
+- Load existing attendance data for a selected date.
+"""
 import tkinter as tk
 from tkinter import ttk, messagebox
-from datetime import date, datetime
-import re # For time validation
+from datetime import date, datetime # For handling dates, especially today's date
+import re # For regular expression-based time validation
 
-import attendance_db # Assumes this file is in the same directory or python path
+import attendance_db # For database operations related to attendance
 
 class AttendancePage(tk.Frame):
+    """
+    A Tkinter Frame class for managing and marking worker attendance.
+
+    Provides UI elements for date selection, a list of workers with attendance
+    options (status, punch-in/out times), and buttons to load/save attendance.
+    """
     def __init__(self, master):
+        """
+        Initializes the AttendancePage.
+
+        Args:
+            master: The parent tkinter widget.
+        """
         super().__init__(master)
         self.configure(bg="white")
-        self.worker_widgets = [] # To store widgets for each worker
+        self.worker_widgets = [] # List to store dictionaries of widgets for each worker row
 
-        # --- Top Frame for Date Selection and Actions ---
-        top_frame = ttk.Frame(self)
+        # --- Top Frame for Date Selection and Action Buttons ---
+        top_frame = ttk.Frame(self) # Frame to hold date entry and buttons
         top_frame.pack(fill="x", padx=10, pady=10)
 
         ttk.Label(top_frame, text="Select Date (YYYY-MM-DD):").pack(side="left", padx=(0, 5))
-        self.date_var = tk.StringVar(value=date.today().isoformat())
+        self.date_var = tk.StringVar(value=date.today().isoformat()) # Default to today's date
         self.date_entry = ttk.Entry(top_frame, textvariable=self.date_var, width=12)
         self.date_entry.pack(side="left", padx=5)
 
@@ -26,73 +49,87 @@ class AttendancePage(tk.Frame):
         save_button = ttk.Button(top_frame, text="Save Attendance", command=self._save_attendance, style="Accent.TButton")
         save_button.pack(side="left", padx=5)
 
-        # Style for the save button (if not already global)
+        # Define Accent.TButton style if not already defined globally
+        # This ensures the button style is applied if this page is run standalone.
         style = ttk.Style()
         style.configure("Accent.TButton", foreground="white", background="dodgerblue")
 
 
-        # --- Scrollable Area for Attendance Marking ---
-        canvas_frame = ttk.Frame(self)
+        # --- Scrollable Area for Listing Workers and Marking Attendance ---
+        # A common pattern for scrollable frames in Tkinter: Canvas + Frame + Scrollbar
+        canvas_frame = ttk.Frame(self) # Container for canvas and scrollbar
         canvas_frame.pack(fill="both", expand=True, padx=10, pady=(0,10))
 
-        self.canvas = tk.Canvas(canvas_frame, bg="white")
+        self.canvas = tk.Canvas(canvas_frame, bg="white") # The canvas widget
         self.canvas.pack(side="left", fill="both", expand=True)
 
         scrollbar = ttk.Scrollbar(canvas_frame, orient="vertical", command=self.canvas.yview)
-        scrollbar.pack(side="right", fill="y")
+        scrollbar.pack(side="right", fill="y") # Vertical scrollbar
 
-        self.canvas.configure(yscrollcommand=scrollbar.set)
+        self.canvas.configure(yscrollcommand=scrollbar.set) # Link scrollbar to canvas
 
+        # This frame will contain the actual worker rows and will be scrolled by the canvas.
         self.scrollable_frame = ttk.Frame(self.canvas)
+        # Add scrollable_frame to the canvas using create_window
         self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
 
+        # Configure scrollregion when the scrollable_frame's size changes
         self.scrollable_frame.bind("<Configure>", lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
+        # Adjust the width of the scrollable_frame within the canvas when canvas width changes
         self.canvas.bind("<Configure>", self._on_canvas_configure)
 
-
-        # Initial load
-        self._create_worker_rows() # Create rows first
-        self._load_attendance_for_date() # Then populate them
+        # --- Initial Data Load ---
+        self._create_worker_rows() # Create the UI structure for worker rows
+        self._load_attendance_for_date() # Populate these rows with data for the default date
 
     def _on_canvas_configure(self, event):
-        # Update the scrollable_frame width to match the canvas width
+        """Adjusts the width of the item inside the canvas to match the canvas width."""
         self.canvas.itemconfig(self.canvas_window, width=event.width)
 
     def _create_worker_rows(self):
-        # Clear existing widgets in scrollable_frame if any (e.g., if workers list changes)
+        """
+        Creates the UI rows for each worker in the scrollable_frame.
+        Each row includes labels for worker name, radio buttons for status,
+        and entry fields for punch-in/out times.
+        """
+        # Clear any existing widgets from previous loads
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
-        self.worker_widgets = []
+        self.worker_widgets = [] # Reset the list of worker widget references
 
         workers = attendance_db.get_all_active_workers_for_attendance()
         if not workers:
+            # If no workers are found, display a message.
             ttk.Label(self.scrollable_frame, text="No workers found. Please add workers in Worker Management.", padding=10).pack()
             return
 
-        # Header
+        # --- Header Row for the worker list ---
         header_frame = ttk.Frame(self.scrollable_frame, padding=(0,0,0,5))
         header_frame.pack(fill="x", expand=True)
+        # Define column headers
         ttk.Label(header_frame, text="Worker Name", font=('Arial', 10, 'bold'), width=30).pack(side="left", padx=5)
         ttk.Label(header_frame, text="Status", font=('Arial', 10, 'bold'), width=15, anchor="center").pack(side="left", padx=5)
         ttk.Label(header_frame, text="Punch In (HH:MM)", font=('Arial', 10, 'bold'), width=15, anchor="center").pack(side="left", padx=5)
         ttk.Label(header_frame, text="Punch Out (HH:MM)", font=('Arial', 10, 'bold'), width=15, anchor="center").pack(side="left", padx=5)
-        # Add a dummy label to consume extra space if columns are too narrow for canvas width
+        # Dummy label to help with layout, pushing other elements to their defined widths.
         ttk.Label(header_frame, text="", font=('Arial', 10, 'bold')).pack(side="left", padx=5, expand=True, fill='x')
 
-
+        # --- Create a row for each worker ---
         for worker in workers:
-            row_frame = ttk.Frame(self.scrollable_frame, padding=2)
+            row_frame = ttk.Frame(self.scrollable_frame, padding=2) # Frame for each worker's row
             row_frame.pack(fill="x", expand=True, pady=1)
 
             worker_name = f"{worker.get('first_name', '')} {worker.get('last_name', '')}".strip()
             ttk.Label(row_frame, text=worker_name, width=30, anchor="w").pack(side="left", padx=5)
 
-            status_var = tk.StringVar(value="Absent") # Default to Absent
+            # Attendance status (Present/Absent) using Radiobuttons
+            status_var = tk.StringVar(value="Absent") # Default status
             present_rb = ttk.Radiobutton(row_frame, text="Present", variable=status_var, value="Present")
             present_rb.pack(side="left", padx=2)
             absent_rb = ttk.Radiobutton(row_frame, text="Absent", variable=status_var, value="Absent")
-            absent_rb.pack(side="left", padx=(0,15)) # More padding after Absent
+            absent_rb.pack(side="left", padx=(0,15))
 
+            # Entry fields for punch-in and punch-out times
             punch_in_var = tk.StringVar()
             punch_in_entry = ttk.Entry(row_frame, textvariable=punch_in_var, width=10)
             punch_in_entry.pack(side="left", padx=5)

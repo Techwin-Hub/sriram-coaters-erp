@@ -1,50 +1,99 @@
+"""
+Database utility functions for Overtime (OT) Management.
+
+This module provides functions to interact with the 'overtime' table, including:
+- Adding new OT records.
+- Fetching OT records for a specific worker within a date range.
+- Fetching all OT records within a date range.
+"""
 import sqlite3
 
-DB_NAME = 'description.db'
+DB_NAME = 'description.db' # Database file name
 
 def add_ot_record(worker_id, date_str, ot_hours, ot_rate, ot_amount):
-    """Adds a new OT record to the overtime table."""
+    """
+    Adds a new Overtime (OT) record to the 'overtime' table.
+
+    Args:
+        worker_id (int): The ID of the worker.
+        date_str (str): The date of the OT, in 'YYYY-MM-DD' format.
+        ot_hours (float): The number of OT hours worked.
+        ot_rate (float): The rate per OT hour.
+        ot_amount (float): The total OT amount (calculated as ot_hours * ot_rate).
+
+    Returns:
+        int: The ID of the newly inserted OT record if successful.
+        None: If an error occurs during the database operation.
+    """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     try:
+        # SQL query to insert a new OT record.
+        # Uses placeholders (?) for security against SQL injection.
         cursor.execute("""
             INSERT INTO overtime (worker_id, date, ot_hours, ot_rate, ot_amount)
             VALUES (?, ?, ?, ?, ?)
         """, (worker_id, date_str, ot_hours, ot_rate, ot_amount))
-        conn.commit()
-        return cursor.lastrowid
+        conn.commit() # Commit the transaction
+        return cursor.lastrowid # Return the ID of the new row
     except sqlite3.Error as e:
         print(f"Database error in add_ot_record: {e}")
+        conn.rollback() # Rollback on error
         return None
     finally:
-        conn.close()
+        conn.close() # Ensure the connection is always closed
 
 def get_ot_records_for_worker_in_range(worker_id, start_date_str, end_date_str):
-    """Fetches OT records for a specific worker within a given date range."""
+    """
+    Fetches all OT records for a specific worker within a given date range.
+    Records are ordered by date in descending order.
+
+    Args:
+        worker_id (int): The ID of the worker whose OT records are to be fetched.
+        start_date_str (str): The start date of the range ('YYYY-MM-DD').
+        end_date_str (str): The end date of the range ('YYYY-MM-DD').
+
+    Returns:
+        list: A list of dictionaries, where each dictionary represents an OT record.
+              Returns an empty list if no records are found or an error occurs.
+    """
     conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row # Access columns by name
+    conn.row_factory = sqlite3.Row # Access columns by name for easy dict conversion
     cursor = conn.cursor()
     try:
+        # SQL query to select OT records for a specific worker and date range.
         cursor.execute("""
             SELECT id, worker_id, date, ot_hours, ot_rate, ot_amount
             FROM overtime
             WHERE worker_id = ? AND date BETWEEN ? AND ?
             ORDER BY date DESC
         """, (worker_id, start_date_str, end_date_str))
-        records = [dict(row) for row in cursor.fetchall()]
+        records = [dict(row) for row in cursor.fetchall()] # Convert rows to dictionaries
         return records
     except sqlite3.Error as e:
         print(f"Database error in get_ot_records_for_worker_in_range: {e}")
-        return []
+        return [] # Return empty list on error
     finally:
         conn.close()
 
 def get_all_ot_records_in_range(start_date_str, end_date_str):
-    """Fetches all OT records within a given date range."""
+    """
+    Fetches all OT records from all workers within a given date range.
+    Records are ordered by date (descending) and then by worker_id.
+
+    Args:
+        start_date_str (str): The start date of the range ('YYYY-MM-DD').
+        end_date_str (str): The end date of the range ('YYYY-MM-DD').
+
+    Returns:
+        list: A list of dictionaries, where each dictionary represents an OT record.
+              Returns an empty list if no records are found or an error occurs.
+    """
     conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
+    conn.row_factory = sqlite3.Row # Access columns by name
     cursor = conn.cursor()
     try:
+        # SQL query to select all OT records within the specified date range.
         cursor.execute("""
             SELECT id, worker_id, date, ot_hours, ot_rate, ot_amount
             FROM overtime
@@ -60,64 +109,74 @@ def get_all_ot_records_in_range(start_date_str, end_date_str):
         conn.close()
 
 if __name__ == '__main__':
-    # For testing - ensure database_utils.init_db() has been run once
+    # This block is for testing the functions in this module when run directly.
+    # It's recommended to have the database initialized (database_utils.init_db())
+    # and some workers present in the 'workers' table for comprehensive testing.
+
+    # Example of how one might set up for testing:
     # from database_utils import init_db
-    # init_db()
+    # init_db() # Ensures tables exist.
 
-    # Also ensure worker_db has some workers, e.g., by running worker_management.py or:
-    # import worker_db
-    # try:
-    #     if not worker_db.get_all_workers(): # Assuming get_all_workers exists
-    #         worker_db.add_worker({'first_name': 'OT Test', 'last_name': 'Worker', 'role': 'Tester', 'joining_date': '2023-01-01'})
-    # except Exception as e:
-    #     print(f"Could not ensure test worker: {e}")
-
-    # worker_list = worker_db.get_all_workers() # Need a worker_id for testing
-    # test_worker_id = 1
-    # if worker_list:
-    #     test_worker_id = worker_list[0]['id']
+    # import worker_db # To get worker IDs for testing
+    # workers = worker_db.get_all_workers()
+    # test_worker_id = 1 # Default to 1 if no workers found or for simplicity
+    # if workers:
+    #     test_worker_id = workers[0]['id'] # Use an actual worker ID from the DB
     # else:
-    #     print("Cannot run full OT DB tests without workers in the DB.")
-    #     test_worker_id = 1 # Fallback, might fail if worker 1 doesn't exist
+    #     print("Warning: No workers found in DB. OT DB tests will use a placeholder worker ID.")
+    #     # Optionally, add a test worker if none exist:
+    #     # worker_db.add_worker({
+    #     #     'first_name': 'OT_DB_Tester', 'last_name': 'Worker',
+    #     #     'role': 'Test Role', 'joining_date': '2023-01-01'
+    #     #     # ... other required fields ...
+    #     # })
+    #     # workers = worker_db.get_all_workers() # Re-fetch
+    #     # if workers: test_worker_id = workers[0]['id']
 
     print("Testing ot_db.py...")
-    test_worker_id = 1 # Assume worker with ID 1 exists for basic tests.
-                       # A more robust test would fetch a worker ID first.
+
+    # Using a placeholder worker_id for demonstration.
+    # Replace with actual worker ID fetching for robust testing.
+    current_test_worker_id = 1
 
     # 1. Test add_ot_record
     print("\n--- Testing add_ot_record ---")
-    record_id = add_ot_record(test_worker_id, '2024-07-15', 2.5, 100.0, 250.0)
-    if record_id:
-        print(f"Added OT record with ID: {record_id}")
-        record_id_2 = add_ot_record(test_worker_id, '2024-07-16', 1.0, 120.0, 120.0)
-        print(f"Added another OT record with ID: {record_id_2 if record_id_2 else 'Failed'}")
+    # Note: For this test to pass reliably, worker with current_test_worker_id must exist.
+    record_id1 = add_ot_record(current_test_worker_id, '2024-07-20', 2.0, 150.0, 300.0)
+    if record_id1:
+        print(f"SUCCESS: Added OT record with ID: {record_id1}")
+        record_id2 = add_ot_record(current_test_worker_id, '2024-07-21', 1.5, 150.0, 225.0)
+        if record_id2:
+            print(f"SUCCESS: Added another OT record with ID: {record_id2}")
+        else:
+            print(f"FAILED: Could not add second OT record for worker {current_test_worker_id}.")
     else:
-        print("Failed to add OT record. (Does worker ID 1 exist?)")
+        print(f"FAILED: Could not add first OT record. (Does worker ID {current_test_worker_id} exist?)")
 
     # 2. Test get_ot_records_for_worker_in_range
-    print("\n--- Testing get_ot_records_for_worker_in_range ---")
-    worker_records = get_ot_records_for_worker_in_range(test_worker_id, '2024-07-01', '2024-07-31')
-    if worker_records:
-        print(f"Found {len(worker_records)} OT records for worker {test_worker_id} in July 2024:")
-        for rec in worker_records:
-            print(f"  Date: {rec['date']}, Hours: {rec['ot_hours']}, Rate: {rec['ot_rate']}, Amount: {rec['ot_amount']}")
+    print(f"\n--- Testing get_ot_records_for_worker_in_range (Worker ID: {current_test_worker_id}) ---")
+    worker_ot_records = get_ot_records_for_worker_in_range(current_test_worker_id, '2024-07-01', '2024-07-31')
+    if worker_ot_records:
+        print(f"SUCCESS: Found {len(worker_ot_records)} OT records for worker {current_test_worker_id} in July 2024:")
+        for r in worker_ot_records:
+            print(f"  Date: {r['date']}, Hours: {r['ot_hours']}, Rate: {r['ot_rate']}, Amount: {r['ot_amount']}")
     else:
-        print(f"No OT records found for worker {test_worker_id} in July 2024, or error.")
+        print(f"INFO: No OT records found for worker {current_test_worker_id} in July 2024, or an error occurred.")
 
     # 3. Test get_all_ot_records_in_range
     print("\n--- Testing get_all_ot_records_in_range ---")
-    all_records = get_all_ot_records_in_range('2024-07-01', '2024-07-31')
-    if all_records:
-        print(f"Found {len(all_records)} total OT records in July 2024:")
-        for rec in all_records:
-            print(f"  Worker ID: {rec['worker_id']}, Date: {rec['date']}, Hours: {rec['ot_hours']}, Amount: {rec['ot_amount']}")
+    all_ot_records = get_all_ot_records_in_range('2024-07-01', '2024-07-31')
+    if all_ot_records:
+        print(f"SUCCESS: Found {len(all_ot_records)} total OT records in July 2024:")
+        for r in all_ot_records: # Print a few for verification
+            print(f"  Worker ID: {r['worker_id']}, Date: {r['date']}, Hours: {r['ot_hours']}, Amount: {r['ot_amount']}")
     else:
-        print("No OT records found at all in July 2024, or error.")
+        print("INFO: No OT records found overall in July 2024, or an error occurred.")
 
-    # Test with a different worker (assuming worker ID 2 might exist)
-    add_ot_record(2, '2024-07-15', 3.0, 110.0, 330.0)
-    all_records_after_new = get_all_ot_records_in_range('2024-07-01', '2024-07-31')
-    print(f"Total OT records after adding for worker 2: {len(all_records_after_new)}")
+    # Example: Add record for a different worker (assuming worker ID 2 exists)
+    # For robust testing, ensure worker ID 2 actually exists or create it.
+    # add_ot_record(2, '2024-07-20', 3.0, 120.0, 360.0)
+    # all_ot_records_updated = get_all_ot_records_in_range('2024-07-01', '2024-07-31')
+    # print(f"Total OT records after potentially adding for worker 2: {len(all_ot_records_updated)}")
 
-
-    print("\not_db.py testing complete.")
+    print("\n--- ot_db.py testing complete ---")
