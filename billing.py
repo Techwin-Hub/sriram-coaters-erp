@@ -7,9 +7,13 @@ import billing_db # Functions to interact with the billing tables in the databas
 
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase import pdfmetrics
+from num2words import num2words # For amount in words
+from datetime import date # For default date
 
 class BillingEntryPage(tk.Frame):
     EXCEL_FILE_NAME = "RANE 2025-2026.xlsx"
@@ -25,22 +29,34 @@ class BillingEntryPage(tk.Frame):
         self.edit_mode = False
         self.editing_invoice_no = None
 
-        # The local page_title_label previously here has been removed.
-        # Title is handled by main_app.py via self.main_app_title_var
+        # Register Courier font if not already registered (globally for reportlab)
+        # Also, set initial invoice number
+        try:
+            pdfmetrics.getFont('Courier')
+        except KeyError: # Font not yet registered
+            try:
+                pdfmetrics.registerFont(TTFont('Courier', 'Courier.ttf'))
+                pdfmetrics.registerFont(TTFont('Courier-Bold', 'Courier-Bold.ttf')) # If you have bold variant
+            except Exception as e:
+                print(f"Warning: Could not register Courier font for PDF: {e}. Using Helvetica.")
+
 
         header_frame = ttk.LabelFrame(self, text="Invoice Details", padding=(10, 5))
         header_frame.pack(padx=20, pady=10, fill="x")
 
+        # Row 0
         ttk.Label(header_frame, text="Invoice Number:").grid(row=0, column=0, padx=5, pady=5, sticky="w")
         self.invoice_no_var = tk.StringVar()
+        self.invoice_no_var.set(self._generate_next_invoice_no()) # Set initial invoice number
         self.invoice_no_entry = ttk.Entry(header_frame, textvariable=self.invoice_no_var, width=30)
         self.invoice_no_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
 
         ttk.Label(header_frame, text="Date (YYYY-MM-DD):").grid(row=0, column=2, padx=5, pady=5, sticky="w")
-        self.date_var = tk.StringVar()
+        self.date_var = tk.StringVar(value=date.today().isoformat())
         self.date_entry = ttk.Entry(header_frame, textvariable=self.date_var, width=30)
         self.date_entry.grid(row=0, column=3, padx=5, pady=5, sticky="ew")
 
+        # Row 1
         ttk.Label(header_frame, text="Customer Name:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.customer_name_var = tk.StringVar()
         self.customer_name_entry = ttk.Entry(header_frame, textvariable=self.customer_name_var, width=30)
@@ -53,14 +69,32 @@ class BillingEntryPage(tk.Frame):
         self.payment_method_combo.grid(row=1, column=3, padx=5, pady=5, sticky="ew")
         self.payment_method_combo.set("Cash")
 
+        # Row 2
         ttk.Label(header_frame, text="GST % (e.g., 18):").grid(row=2, column=0, padx=5, pady=5, sticky="w")
         self.gst_percentage_var = tk.StringVar()
         self.gst_percentage_entry = ttk.Entry(header_frame, textvariable=self.gst_percentage_var, width=30)
         self.gst_percentage_entry.grid(row=2, column=1, padx=5, pady=5, sticky="ew")
 
+        ttk.Label(header_frame, text="PO Number:").grid(row=2, column=2, padx=5, pady=5, sticky="w")
+        self.po_number_var = tk.StringVar()
+        self.po_number_entry = ttk.Entry(header_frame, textvariable=self.po_number_var, width=30)
+        self.po_number_entry.grid(row=2, column=3, padx=5, pady=5, sticky="ew")
+
+        # Row 3 - GRN Dates
+        ttk.Label(header_frame, text="GRN Date From:").grid(row=3, column=0, padx=5, pady=5, sticky="w")
+        self.grn_date_from_var = tk.StringVar()
+        self.grn_date_from_entry = ttk.Entry(header_frame, textvariable=self.grn_date_from_var, width=30)
+        self.grn_date_from_entry.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
+
+        ttk.Label(header_frame, text="GRN Date To:").grid(row=3, column=2, padx=5, pady=5, sticky="w")
+        self.grn_date_to_var = tk.StringVar()
+        self.grn_date_to_entry = ttk.Entry(header_frame, textvariable=self.grn_date_to_var, width=30)
+        self.grn_date_to_entry.grid(row=3, column=3, padx=5, pady=5, sticky="ew")
+
         header_frame.columnconfigure(1, weight=1)
         header_frame.columnconfigure(3, weight=1)
 
+        # ... (rest of __init__ method: line item entry, current items tree, history, summary/actions)
         line_item_entry_frame = ttk.LabelFrame(self, text="Add Line Item", padding=(10, 5))
         line_item_entry_frame.pack(padx=20, pady=10, fill="x")
 
@@ -141,7 +175,7 @@ class BillingEntryPage(tk.Frame):
         clear_search_button = ttk.Button(search_controls_frame, text="Show All", command=self._load_billing_history)
         clear_search_button.pack(side="left", padx=5)
 
-        history_columns = ("invoice_no", "date", "customer_name", "total_amount", "gst_percentage", "payment_method")
+        history_columns = ("invoice_no", "date", "customer_name", "total_amount", "gst_percentage", "payment_method") # PO Number could be added here
         self.history_tree = ttk.Treeview(history_frame, columns=history_columns, show="headings", height=6)
         self.history_tree.heading("invoice_no", text="Invoice No")
         self.history_tree.heading("date", text="Date")
@@ -181,6 +215,37 @@ class BillingEntryPage(tk.Frame):
 
         self._load_billing_history()
 
+    def _generate_next_invoice_no(self) -> str:
+        last_invoice_no_str = billing_db.get_last_invoice_no()
+        if last_invoice_no_str:
+            try:
+                # Attempt to extract numeric part for incrementing
+                match = None
+                for i, char_val in enumerate(last_invoice_no_str):
+                    if char_val.isdigit():
+                        match = i
+                        break
+
+                if match is not None:
+                    prefix = last_invoice_no_str[:match]
+                    numeric_part_str = last_invoice_no_str[match:]
+                    if numeric_part_str.isdigit():
+                        next_num = int(numeric_part_str) + 1
+                        return f"{prefix}{str(next_num).zfill(len(numeric_part_str))}"
+
+                if last_invoice_no_str.isdigit():
+                    next_num = int(last_invoice_no_str) + 1
+                    return str(next_num).zfill(len(last_invoice_no_str))
+
+                print(f"Warning: Could not reliably increment invoice number '{last_invoice_no_str}'. Defaulting.")
+                return "001"
+
+            except ValueError:
+                print(f"Warning: Could not parse last invoice number '{last_invoice_no_str}' for incrementing. Defaulting.")
+                return "001"
+        else:
+            return "001"
+
     def _on_history_select(self, event):
         selected_items = self.history_tree.selection()
         if selected_items:
@@ -216,6 +281,9 @@ class BillingEntryPage(tk.Frame):
         self.customer_name_var.set(header_data.get('customer_name', ''))
         self.payment_method_var.set(header_data.get('payment_method', 'Cash'))
         self.gst_percentage_var.set(str(header_data.get('gst_percentage', '')))
+        self.po_number_var.set(header_data.get('po_number', '')) # Populate PO Number
+        self.grn_date_from_var.set(header_data.get('grn_date_from', '')) # Populate GRN Date From
+        self.grn_date_to_var.set(header_data.get('grn_date_to', ''))     # Populate GRN Date To
         self.invoice_no_entry.config(state="readonly")
 
         self.line_items_data.clear()
@@ -243,6 +311,10 @@ class BillingEntryPage(tk.Frame):
         self.save_invoice_button.config(text="Update Invoice")
         if self.main_app_title_var:
             self.main_app_title_var.set(f"Edit Invoice: {self.editing_invoice_no}")
+        # Ensure invoice number entry is focused for new/edit
+        self.invoice_no_entry.focus_set()
+        if self.edit_mode: # If editing, move focus to date perhaps, as invoice_no is readonly
+            self.date_entry.focus_set()
 
 
     def _delete_selected_invoice(self):
@@ -290,71 +362,166 @@ class BillingEntryPage(tk.Frame):
             doc = SimpleDocTemplate(file_path, pagesize=letter,
                                     rightMargin=0.5*inch, leftMargin=0.5*inch,
                                     topMargin=0.5*inch, bottomMargin=0.5*inch)
+
             styles = getSampleStyleSheet()
+            # Attempt to use Courier, fallback to Helvetica if Courier not found/registered
+            try:
+                pdfmetrics.getFont('Courier') # Check if Courier is available
+                courier_font_name = 'Courier'
+            except KeyError:
+                courier_font_name = 'Helvetica' # Fallback font
+                print("Warning: Courier font not found, using Helvetica for PDF.")
+
+            courier_style = ParagraphStyle('Courier', parent=styles['Normal'], fontName=courier_font_name, fontSize=10, leading=12)
+            courier_bold_style = ParagraphStyle('CourierBold', parent=courier_style, fontName=courier_font_name + '-Bold' if courier_font_name == 'Courier' else 'Helvetica-Bold')
+            company_name_style = ParagraphStyle('CompName', parent=courier_style, alignment=1, fontSize=12, fontName=courier_font_name + '-Bold' if courier_font_name == 'Courier' else 'Helvetica-Bold')
+            centered_courier_style = ParagraphStyle('CenteredCourier', parent=courier_style, alignment=1)
+
+
             story = []
 
-            story.append(Paragraph("INVOICE", styles['h1']))
-            story.append(Spacer(1, 0.2*inch))
-            story.append(Paragraph("SRIRAM COATERS", styles['h3']))
-            story.append(Paragraph("Ambal Nagar Boothakudi Village, Viralimalai", styles['Normal']))
-            story.append(Paragraph("GSTIN: 33ALQPK2156A1ZG | Cell: 9443410161", styles['Normal']))
-            story.append(Spacer(1, 0.2*inch))
+            # Header
+            header_text_1 = f"SSI NO. 332213072/26-12-03{'LABOUR BILL INVOICE'.center(30)}{'MOB: 9443410161'.rjust(25)}"
+            header_text_2 = f"GSTin NO: 33ALQPK2156A1zg{'E-MAIL: kasinatharm@yahoo.in'.rjust(55)}" # Adjusted spacing
+            story.append(Paragraph(header_text_1, courier_style))
+            story.append(Paragraph(header_text_2, courier_style))
+            story.append(Spacer(1, 0.05*inch))
+            story.append(Paragraph("SRIRAM     COATERS", company_name_style))
+            story.append(Paragraph("AMBAL NAGAR, BOOTHAKUDI VILLAGE, VIRALIMALAI-621316", centered_courier_style))
+            story.append(Paragraph("*"*78, centered_courier_style)) # Approx 78 chars for 6.5 inch width at 10cpi
 
-            story.append(Paragraph(f"<b>Invoice No:</b> {header_data['invoice_no']}", styles['Normal']))
-            story.append(Paragraph(f"<b>Date:</b> {header_data['date']}", styles['Normal']))
-            story.append(Paragraph(f"<b>Customer:</b> {header_data['customer_name']}", styles['Normal']))
-            story.append(Spacer(1, 0.2*inch))
+            # Invoice Info (Inv No, Date)
+            inv_no_str = f"INVOICE NO: {header_data.get('invoice_no', 'N/A')}"
+            date_str = f"* INV.DATE * {header_data.get('date', 'N/A')}"
+            # Attempt to align date to the right. Max chars approx 78.
+            padding_needed = 78 - len(inv_no_str) - len(date_str)
+            inv_info_line = f"{inv_no_str}{' ' * max(0, padding_needed)}{date_str}"
+            story.append(Paragraph(inv_info_line, courier_style))
+            story.append(Paragraph("*"*78, centered_courier_style))
 
-            table_data = [["#", "Item Description", "Part No", "HSN", "Qty", "Rate", "Amount"]]
+            # Customer/PO Info
+            # Using a table for better alignment of left and right content
+            customer_gstin_placeholder = "33AAACR3147C1ZY" # Placeholder for actual customer GSTIN
+            left_col_text = f"""TO<br/>
+                                THE MANAGER,<br/>
+                                M/s {header_data.get('customer_name', 'N/A')},<br/>
+                                BOOTHAKUDI VILLAGE, VIRALIMALAI-621316.<br/>
+                                <br/>
+                                GSTin NO: {customer_gstin_placeholder}""" # Replace with actual data if available
+
+            right_col_text = f"""*<br/>
+                                 *PONO:     {header_data.get('po_number', 'N/A')}<br/>
+                                 *<br/>
+                                 *<br/>
+                                 *"""
+
+            customer_po_data = [[Paragraph(left_col_text, courier_style), Paragraph(right_col_text, courier_style)]]
+            table_cust_po = Table(customer_po_data, colWidths=[4.5*inch, 2.8*inch]) # Adjusted total width
+            table_cust_po.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'TOP'),
+                ('LEFTPADDING', (0,0), (-1,-1), 0),
+                ('RIGHTPADDING', (0,0), (-1,-1), 0),
+            ]))
+            story.append(table_cust_po)
+            story.append(Paragraph("*"*78, centered_courier_style))
+
+
+            # Line Items Table
+            table_data = [[
+                Paragraph("SNO", courier_bold_style),
+                Paragraph("ITEM DESCRIPTION", courier_bold_style),
+                Paragraph("PART NO", courier_bold_style),
+                Paragraph("HSN CODE", courier_bold_style),
+                Paragraph("QATY", courier_bold_style),
+                Paragraph("RATE", courier_bold_style),
+                Paragraph("AMOUNT", courier_bold_style)
+            ]]
+
             for item in line_items_data:
                 table_data.append([
-                    item['line_no'], Paragraph(item['item_description'], styles['Normal']),
-                    item['part_no'], item['hsn_code'],
-                    f"{item['quantity']:.2f}", f"{item['rate']:.2f}", f"{item['amount']:.2f}"
+                    Paragraph(str(item['line_no']), courier_style),
+                    Paragraph(item['item_description'], courier_style),
+                    Paragraph(item['part_no'] if item['part_no'] else '', courier_style),
+                    Paragraph(item['hsn_code'] if item['hsn_code'] else '', courier_style),
+                    Paragraph(f"{item['quantity']:.2f}", courier_style),
+                    Paragraph(f"{item['rate']:.2f}", courier_style),
+                    Paragraph(f"{item['amount']:.2f}", courier_style)
                 ])
 
-            col_widths = [0.4*inch, 3*inch, 1*inch, 0.8*inch, 0.7*inch, 0.8*inch, 1*inch]
-            line_items_table = Table(table_data, colWidths=col_widths)
+            # Approximate column widths for Courier 10pt on 6.5 inch usable width (78 chars)
+            # SNO(4) * DESC(30) * PART(10) * HSN(8) * QTY(8) * RATE(8) * AMOUNT(10) = 78
+            col_widths_items = [0.4*inch, 3.0*inch, 1.0*inch, 0.8*inch, 0.8*inch, 0.8*inch, 1.0*inch]
+            line_items_table = Table(table_data, colWidths=col_widths_items, repeatRows=1)
 
-            table_style = TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), colors.HexColor("#4F81BD")),
-                ('TEXTCOLOR',(0,0),(-1,0),colors.whitesmoke),
-                ('ALIGN',(0,0),(-1,-1),'CENTER'),
-                ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
-                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0,0), (-1,0), 10),
-                ('BOTTOMPADDING', (0,0), (-1,0), 8),
-                ('BACKGROUND',(0,1),(-1,-1),colors.HexColor("#DCE6F1")),
-                ('TEXTCOLOR',(0,1),(-1,-1),colors.black),
-                ('FONTNAME', (0,1),(-1,-1), 'Helvetica'),
-                ('FONTSIZE', (0,1),(-1,-1), 9),
-                ('GRID',(0,0),(-1,-1),1,colors.black),
-                ('ALIGN', (4,1), (-1,-1), 'RIGHT'),
-            ])
-            line_items_table.setStyle(table_style)
+            line_items_table.setStyle(TableStyle([
+                ('ALIGN', (0,0), (-1,0), 'CENTER'), # Header center
+                ('FONTNAME', (0,0), (-1,0), courier_font_name + '-Bold' if courier_font_name == 'Courier' else 'Helvetica-Bold'),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                # Data cells alignment
+                ('ALIGN', (0,1), (0,-1), 'CENTER'), # SNO
+                ('ALIGN', (1,1), (1,-1), 'LEFT'),   # Description
+                ('ALIGN', (2,1), (3,-1), 'LEFT'),  # Part No, HSN
+                ('ALIGN', (4,1), (-1,-1), 'RIGHT'), # Qty, Rate, Amount
+            ]))
             story.append(line_items_table)
-            story.append(Spacer(1, 0.2*inch))
+            story.append(Paragraph("*"*78, centered_courier_style))
 
-            total_amount = float(header_data.get('total_amount', 0))
-            gst_percentage = float(header_data.get('gst_percentage', 0))
-            gst_amount = (total_amount * gst_percentage) / 100 if gst_percentage else 0.0
-            grand_total = total_amount + gst_amount
+
+            # Totals section
+            total_val = float(header_data.get('total_amount', 0.0))
+            gst_perc = float(header_data.get('gst_percentage', 0.0))
+
+            # Assuming GST is split equally for CGST and SGST
+            cgst_perc = gst_perc / 2
+            sgst_perc = gst_perc / 2
+            cgst_val = (total_val * cgst_perc) / 100
+            sgst_val = (total_val * sgst_perc) / 100
+            grand_total_val = total_val + cgst_val + sgst_val
 
             totals_data = [
-                [Paragraph("Subtotal:", styles['Normal']), Paragraph(f"{total_amount:.2f}", styles['Normal'])],
-                [Paragraph(f"GST ({gst_percentage:.2f}%):", styles['Normal']), Paragraph(f"{gst_amount:.2f}", styles['Normal'])],
-                [Paragraph("<b>Grand Total:</b>", styles['h3']), Paragraph(f"<b>{grand_total:.2f}</b>", styles['h3'])],
+                ['', Paragraph('TOTAL', courier_style), Paragraph(f"{total_val:.2f}", courier_style)],
+                ['', Paragraph(f"CGST {cgst_perc:.1f}%", courier_style), Paragraph(f"{cgst_val:.2f}", courier_style)],
+                ['', Paragraph(f"SGST {sgst_perc:.1f}%", courier_style), Paragraph(f"{sgst_val:.2f}", courier_style)],
+                ['', Paragraph('GRAND TOTAL', courier_bold_style), Paragraph(f"{grand_total_val:.2f}", courier_bold_style)],
             ]
-            totals_table = Table(totals_data, colWidths=[5.7*inch, 1*inch])
+            totals_table = Table(totals_data, colWidths=[4.8*inch, 1.5*inch, 1.5*inch]) # Adjusted widths
             totals_table.setStyle(TableStyle([
-                ('ALIGN', (0,0), (0,-1), 'RIGHT'), ('ALIGN', (1,0), (1,-1), 'RIGHT'),
-                ('LEFTPADDING', (0,0), (-1,-1), 0), ('RIGHTPADDING', (0,0), (-1,-1), 0),
+                ('ALIGN', (1,0), (-1,-1), 'RIGHT'),
+                ('LEFTPADDING', (0,0), (-1,-1), 0),
+                ('RIGHTPADDING', (0,0), (-1,-1), 0),
+                 ('TOPPADDING', (0,0), (-1,-1), 1),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 1),
             ]))
             story.append(totals_table)
-            story.append(Spacer(1, 0.2*inch))
-            story.append(Paragraph(f"<b>Payment Method:</b> {header_data.get('payment_method', 'N/A')}", styles['Normal']))
-            story.append(Spacer(1, 0.4*inch))
-            story.append(Paragraph("Thank you for your business!", styles['Italic']))
+            story.append(Paragraph("*"*78, centered_courier_style))
+
+            # Amount in Words
+            amount_words_prefix = "AMOUNT IN WORDS:"
+            # Use num2words, ensure it handles decimals correctly for Indian currency or format as needed
+            # For example, get integer part and decimal part separately if num2words has issues with paisa
+            rupees = int(grand_total_val)
+            paisa = int(round((grand_total_val - rupees) * 100))
+
+            amount_words_str = f"{num2words(rupees, lang='en_IN').upper()} RUPEES"
+            if paisa > 0:
+                amount_words_str += f" AND {num2words(paisa, lang='en_IN').upper()} PAISA"
+            amount_words_str += " ONLY"
+
+            story.append(Paragraph(amount_words_prefix, courier_style))
+            story.append(Paragraph(amount_words_str, courier_style)) # This might need wrapping if too long
+            story.append(Paragraph("*"*78, centered_courier_style))
+
+
+            # GRN Listing Date
+            grn_from = header_data.get('grn_date_from', 'N/A')
+            grn_to = header_data.get('grn_date_to', 'N/A')
+            story.append(Paragraph(f"GRN LISTING DATE BETWEEN<br/>{grn_from} TO {grn_to}", courier_style))
+            story.append(Paragraph("*"*78, centered_courier_style))
+
+            # Footer
+            story.append(Spacer(1, 0.3*inch))
+            story.append(Paragraph("FOR SRIRAM COATERS", ParagraphStyle('Footer', parent=courier_style, alignment=2))) # Right align
 
             doc.build(story)
             messagebox.showinfo("Success", f"PDF saved to {file_path}")
@@ -462,6 +629,10 @@ class BillingEntryPage(tk.Frame):
         customer_name = self.customer_name_var.get().strip()
         payment_method = self.payment_method_var.get()
         gst_percentage_str = self.gst_percentage_var.get().strip()
+        po_number = self.po_number_var.get().strip()
+        grn_date_from = self.grn_date_from_var.get().strip()
+        grn_date_to = self.grn_date_to_var.get().strip()
+
 
         if not invoice_no or not invoice_date or not customer_name:
             messagebox.showerror("Validation Error", "Invoice Number, Date, and Customer Name are required.")
@@ -479,12 +650,20 @@ class BillingEntryPage(tk.Frame):
         header_data = {
             'invoice_no': invoice_no, 'date': invoice_date, 'customer_name': customer_name,
             'total_amount': total_invoice_amount, 'gst_percentage': gst_percentage,
-            'payment_method': payment_method
+            'payment_method': payment_method, 'po_number': po_number,
+            'grn_date_from': grn_date_from if grn_date_from else None,
+            'grn_date_to': grn_date_to if grn_date_to else None
         }
 
-        if not billing_db.add_invoice_header(header_data):
-            messagebox.showerror("Database Error", f"Failed to save invoice header for {invoice_no}. It might already exist.")
+        save_header_result = billing_db.add_invoice_header(header_data)
+
+        if save_header_result is not True:
+            if save_header_result == "DUPLICATE":
+                messagebox.showerror("Duplicate Invoice", f"Invoice number '{invoice_no}' already exists. Please use a different invoice number.")
+            else:
+                messagebox.showerror("Database Error", f"Failed to save invoice header for {invoice_no}. Please check application logs for details or ensure database is correctly set_up.")
             return
+
 
         line_items_for_db = [{'invoice_no': invoice_no, **item} for item in self.line_items_data]
         if not billing_db.add_invoice_line_items_batch(line_items_for_db):
@@ -510,6 +689,9 @@ class BillingEntryPage(tk.Frame):
         customer_name = self.customer_name_var.get().strip()
         payment_method = self.payment_method_var.get()
         gst_percentage_str = self.gst_percentage_var.get().strip()
+        po_number = self.po_number_var.get().strip()
+        grn_date_from = self.grn_date_from_var.get().strip()
+        grn_date_to = self.grn_date_to_var.get().strip()
 
         if not invoice_date or not customer_name:
             messagebox.showerror("Validation Error", "Date and Customer Name are required.")
@@ -527,7 +709,9 @@ class BillingEntryPage(tk.Frame):
         updated_header_data = {
             'date': invoice_date, 'customer_name': customer_name,
             'total_amount': total_invoice_amount, 'gst_percentage': gst_percentage,
-            'payment_method': payment_method
+            'payment_method': payment_method, 'po_number': po_number,
+            'grn_date_from': grn_date_from if grn_date_from else None,
+            'grn_date_to': grn_date_to if grn_date_to else None
         }
 
         if not billing_db.update_invoice_header(self.editing_invoice_no, updated_header_data):
@@ -551,11 +735,14 @@ class BillingEntryPage(tk.Frame):
         self._load_billing_history()
 
     def _clear_form_and_reset(self):
-        self.invoice_no_var.set("")
-        self.date_var.set("")
+        self.invoice_no_var.set(self._generate_next_invoice_no()) # Set next suggested invoice number
+        self.date_var.set(date.today().isoformat())
         self.customer_name_var.set("")
         self.payment_method_combo.set("Cash")
         self.gst_percentage_var.set("")
+        self.po_number_var.set("") # Clear PO Number
+        self.grn_date_from_var.set("") # Clear GRN Date From
+        self.grn_date_to_var.set("")   # Clear GRN Date To
 
         self.line_items_data.clear()
         for i in self.tree.get_children():
@@ -597,10 +784,20 @@ class BillingEntryPage(tk.Frame):
 
         if invoice_headers:
             for header in invoice_headers:
-                self.history_tree.insert("", tk.END, values=(
+                # PO Number and GRN Dates might not be in history_tree display yet,
+                # but are fetched by get_all_invoice_headers if DB was updated.
+                # For display, ensure columns match or adapt here.
+                display_values = (
                     header['invoice_no'], header['date'], header['customer_name'],
-                    f"{header['total_amount']:.2f}", f"{header['gst_percentage']:.2f}", header['payment_method']
-                ))
+                    f"{header['total_amount']:.2f}",
+                    f"{header.get('gst_percentage', 0.0):.2f}", # Use .get for new potentially missing cols
+                    header.get('payment_method', ''),
+                    # header.get('po_number', ''), # Example if adding to tree
+                    # header.get('grn_date_from', ''),
+                    # header.get('grn_date_to', '')
+                )
+                self.history_tree.insert("", tk.END, values=display_values[:len(self.history_tree["columns"])])
+
         else:
             if headers_to_load is not None:
                  print("No matching billing history found for the criteria.")

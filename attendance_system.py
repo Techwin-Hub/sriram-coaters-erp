@@ -116,12 +116,13 @@ class AttendancePage(tk.Frame):
         header_frame = ttk.Frame(self.scrollable_frame, padding=(0,0,0,5))
         header_frame.pack(fill="x", expand=True)
         # Define column headers
-        ttk.Label(header_frame, text="Worker Name", font=('Arial', 10, 'bold'), width=30).pack(side="left", padx=5)
-        ttk.Label(header_frame, text="Status", font=('Arial', 10, 'bold'), width=15, anchor="center").pack(side="left", padx=5)
+        ttk.Label(header_frame, text="Worker Name", font=('Arial', 10, 'bold'), width=25).pack(side="left", padx=5) # Adjusted width
+        ttk.Label(header_frame, text="Status", font=('Arial', 10, 'bold'), width=20, anchor="center").pack(side="left", padx=5) # Adjusted width
         ttk.Label(header_frame, text="Punch In (HH:MM)", font=('Arial', 10, 'bold'), width=15, anchor="center").pack(side="left", padx=5)
         ttk.Label(header_frame, text="Punch Out (HH:MM)", font=('Arial', 10, 'bold'), width=15, anchor="center").pack(side="left", padx=5)
-        # Dummy label to help with layout, pushing other elements to their defined widths.
-        ttk.Label(header_frame, text="", font=('Arial', 10, 'bold')).pack(side="left", padx=5, expand=True, fill='x')
+        ttk.Label(header_frame, text="Actions", font=('Arial', 10, 'bold'), width=10, anchor="center").pack(side="left", padx=5)
+        # Dummy label to help with layout
+        # ttk.Label(header_frame, text="", font=('Arial', 10, 'bold')).pack(side="left", padx=5, expand=True, fill='x')
 
         # --- Create a row for each worker ---
         for worker in workers:
@@ -129,14 +130,16 @@ class AttendancePage(tk.Frame):
             row_frame.pack(fill="x", expand=True, pady=1)
 
             worker_name = f"{worker.get('first_name', '')} {worker.get('last_name', '')}".strip()
-            ttk.Label(row_frame, text=worker_name, width=30, anchor="w").pack(side="left", padx=5)
+            ttk.Label(row_frame, text=worker_name, width=25, anchor="w").pack(side="left", padx=5) # Adjusted width
 
-            # Attendance status (Present/Absent) using Radiobuttons
-            status_var = tk.StringVar(value="Absent") # Default status
+            # Attendance status (Present/Absent/OT) using Radiobuttons
+            status_var = tk.StringVar(value="Present") # Default status to Present
             present_rb = ttk.Radiobutton(row_frame, text="Present", variable=status_var, value="Present")
-            present_rb.pack(side="left", padx=2)
+            present_rb.pack(side="left", padx=1)
             absent_rb = ttk.Radiobutton(row_frame, text="Absent", variable=status_var, value="Absent")
-            absent_rb.pack(side="left", padx=(0,15))
+            absent_rb.pack(side="left", padx=1)
+            ot_rb = ttk.Radiobutton(row_frame, text="OT", variable=status_var, value="OT")
+            ot_rb.pack(side="left", padx=(1, 10)) # Adjusted padding
 
             # Entry fields for punch-in and punch-out times
             punch_in_var = tk.StringVar()
@@ -147,35 +150,60 @@ class AttendancePage(tk.Frame):
             punch_out_entry = ttk.Entry(row_frame, textvariable=punch_out_var, width=10)
             punch_out_entry.pack(side="left", padx=5)
 
-            # Add a dummy label to help with layout if needed, or rely on Frame padding
-            # ttk.Label(row_frame, text="").pack(side="left", padx=5, expand=True, fill='x')
+            # Delete button for the attendance entry
+            delete_button = ttk.Button(row_frame, text="Del",
+                                       command=lambda w_id=worker['id']: self._delete_worker_attendance_entry(w_id),
+                                       width=5) # Small width for delete button
+            delete_button.pack(side="left", padx=(10, 5))
 
 
             self.worker_widgets.append({
                 'worker_id': worker['id'],
-                'name_label': worker_name, # For reference
+                'name_label': worker_name,
                 'status_var': status_var,
                 'punch_in_var': punch_in_var,
                 'punch_out_var': punch_out_var,
-                'present_rb': present_rb, # To potentially disable/enable time entries
-                'absent_rb': absent_rb,
+                # Storing radio buttons might not be needed if we don't interact with them directly later
                 'punch_in_entry': punch_in_entry,
                 'punch_out_entry': punch_out_entry,
+                'delete_button': delete_button # Store delete button reference if needed
             })
 
-            # Disable time entries if "Absent" is selected by default
-            def toggle_time_entries(status_var=status_var, in_entry=punch_in_entry, out_entry=punch_out_entry):
-                if status_var.get() == "Absent":
-                    in_entry.config(state="disabled")
-                    out_entry.config(state="disabled")
-                    # punch_in_var.set("") # Optionally clear times when marked absent
-                    # punch_out_var.set("")
-                else:
-                    in_entry.config(state="normal")
-                    out_entry.config(state="normal")
+            # Disable time entries if "Absent" is selected
+            def toggle_time_entries(status_var_local=status_var, in_entry_local=punch_in_entry, out_entry_local=punch_out_entry):
+                current_status = status_var_local.get()
+                if current_status == "Absent":
+                    in_entry_local.config(state="disabled")
+                    out_entry_local.config(state="disabled")
+                    # Optionally clear times
+                    # in_entry_local.delete(0, tk.END)
+                    # out_entry_local.delete(0, tk.END)
+                else: # "Present" or "OT"
+                    in_entry_local.config(state="normal")
+                    out_entry_local.config(state="normal")
 
             status_var.trace_add("write", lambda *args, sv=status_var, pie=punch_in_entry, poe=punch_out_entry: toggle_time_entries(sv, pie, poe))
-            toggle_time_entries(status_var, punch_in_entry, punch_out_entry) # Initial state based on default
+            toggle_time_entries() # Initial state based on default status_var value
+
+    def _delete_worker_attendance_entry(self, worker_id):
+        date_str = self.date_var.get()
+        try:
+            # Validate date format before proceeding with DB operation (same as in _load_attendance_for_date)
+            datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            messagebox.showerror("Invalid Date", "Please select a valid date in YYYY-MM-DD format before deleting.")
+            return
+
+        confirm = messagebox.askyesno("Confirm Delete",
+                                     f"Are you sure you want to delete the attendance record for worker ID {worker_id} on {date_str}?")
+        if confirm:
+            if attendance_db.delete_attendance_record(worker_id, date_str):
+                messagebox.showinfo("Success", "Attendance record deleted successfully.")
+                self._load_attendance_for_date()  # Reload all records for the current date
+            else:
+                messagebox.showerror("Error", f"Failed to delete attendance record for worker ID {worker_id} on {date_str}.")
+        else:
+            print(f"Deletion cancelled for Worker ID: {worker_id} on Date: {date_str}")
 
 
     def _load_attendance_for_date(self):
@@ -221,9 +249,9 @@ class AttendancePage(tk.Frame):
                 worker_row['punch_out_var'].set('')
 
             # Trigger the trace to set initial state of time entries
-            worker_row['status_var'].trace_notify_now()
-        print("_create_worker_rows finished.") # This was misplaced in the previous diff, should be at the end of _create_worker_rows
-        print("_load_attendance_for_date finished.")
+            worker_row['status_var'].trace_notify_now() # This will call toggle_time_entries
+        print("_create_worker_rows finished.") # Correct placement for the end of _create_worker_rows
+        print("_load_attendance_for_date finished.") # This print seems to be from the _load_attendance_for_date context
 
 
     def _validate_time_format(self, time_str):
@@ -250,25 +278,28 @@ class AttendancePage(tk.Frame):
             punch_in = worker_row['punch_in_var'].get().strip()
             punch_out = worker_row['punch_out_var'].get().strip()
 
-            if status == "Present":
-                if not self._validate_time_format(punch_in):
+            if status in ["Present", "OT"]: # Check if status allows time entry
+                if not self._validate_time_format(punch_in) and punch_in: # Allow blank if not entered
                     messagebox.showerror("Invalid Time", f"Invalid Punch In time for {worker_row['name_label']}. Use HH:MM format or leave blank.")
                     all_valid = False
                     break
-                if not self._validate_time_format(punch_out):
+                if not self._validate_time_format(punch_out) and punch_out: # Allow blank if not entered
                     messagebox.showerror("Invalid Time", f"Invalid Punch Out time for {worker_row['name_label']}. Use HH:MM format or leave blank.")
                     all_valid = False
                     break
-            else: # Absent
-                punch_in = "" # Force blank times if absent
+                # If status is OT but times are blank, it's valid. If Present and times are blank, also valid.
+
+            # If status is Absent, force blank times regardless of input
+            if status == "Absent":
+                punch_in = ""
                 punch_out = ""
 
             records_to_save.append({
                 'worker_id': worker_id,
                 'date': date_str,
                 'status': status,
-                'punch_in_time': punch_in if status == "Present" else "",
-                'punch_out_time': punch_out if status == "Present" else ""
+                'punch_in_time': punch_in if status in ["Present", "OT"] else "",
+                'punch_out_time': punch_out if status in ["Present", "OT"] else ""
             })
 
         if not all_valid:

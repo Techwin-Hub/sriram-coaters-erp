@@ -130,6 +130,39 @@ def save_attendance_records(records_to_save):
         if conn:
             conn.close()
 
+def delete_attendance_record(worker_id: int, date_str: str) -> bool:
+    """
+    Deletes a specific attendance record for a given worker and date.
+
+    Args:
+        worker_id (int): The ID of the worker.
+        date_str (str): The date of the attendance record in 'YYYY-MM-DD' format.
+
+    Returns:
+        bool: True if the record was deleted successfully (or didn't exist), False on error.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM attendance WHERE worker_id = ? AND date = ?", (worker_id, date_str))
+        conn.commit()
+        # cursor.rowcount might be 0 if no record matched, which is a successful "deletion" in this context.
+        # It's > 0 if a record was actually deleted. It's -1 if not supported without PRAGMA.
+        # For simplicity, assume success if no exception.
+        return True
+    except sqlite3.OperationalError as e_op:
+        print(f"Database connection error in delete_attendance_record for worker {worker_id}, date {date_str}: {e_op}")
+        return False
+    except sqlite3.Error as e:
+        print(f"Database error in delete_attendance_record for worker {worker_id}, date {date_str}: {e}")
+        if conn:
+            conn.rollback()
+        return False
+    finally:
+        if conn:
+            conn.close()
+
 if __name__ == '__main__':
     # This block is for testing the functions in this module when run directly.
     # It's advisable to ensure that 'database_utils.init_db()' has been run at least once
@@ -228,5 +261,29 @@ if __name__ == '__main__':
         print(f"SUCCESS: Correctly found no records for {far_past_date}.")
     else:
         print(f"INFO: Unexpectedly found {len(far_past_records)} records for {far_past_date}: {far_past_records}")
+
+    # Test delete_attendance_record
+    if workers: # Only test delete if we had workers and potentially saved records
+        test_worker_id_for_delete = workers[0]['id']
+        test_date_for_delete = today_date_str
+        # First, ensure a record exists or try to save one for deletion test
+        print(f"\n--- Testing delete_attendance_record for Worker ID {test_worker_id_for_delete} on {test_date_for_delete} ---")
+        # Ensure record exists (it might from previous save test)
+        # save_attendance_records([{'worker_id': test_worker_id_for_delete, 'date': test_date_for_delete,
+        #                           'status': 'Present', 'punch_in_time': '08:00', 'punch_out_time': '16:00'}])
+
+        if delete_attendance_record(test_worker_id_for_delete, test_date_for_delete):
+            print("SUCCESS: delete_attendance_record reported success.")
+            # Verify by trying to fetch it
+            deleted_record_check = get_attendance_records(test_date_for_delete)
+            if not deleted_record_check.get(test_worker_id_for_delete):
+                print(f"VERIFIED: Record for Worker ID {test_worker_id_for_delete} on {test_date_for_delete} is no longer found.")
+            else:
+                print(f"VERIFICATION FAILED: Record for Worker ID {test_worker_id_for_delete} on {test_date_for_delete} still exists.")
+        else:
+            print("FAILED: delete_attendance_record reported an error.")
+    else:
+        print("\nSkipping delete_attendance_record test as no workers were available.")
+
 
     print("\n--- attendance_db.py testing complete ---")

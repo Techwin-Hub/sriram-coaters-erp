@@ -15,7 +15,7 @@ def add_invoice_header(header_data: dict) -> bool:
                                            'total_amount', 'gst_percentage', 'payment_method',
                                            'grn_date_from', 'grn_date_to', 'po_number'.
     Returns:
-        bool: True if the record was added successfully, False otherwise.
+        bool | str: True if successful, "DUPLICATE" if integrity error (invoice_no exists), False otherwise.
     """
     conn = None
     try:
@@ -32,11 +32,16 @@ def add_invoice_header(header_data: dict) -> bool:
         """, data_for_insert)
         conn.commit()
         return True
+    except sqlite3.IntegrityError as ie:
+        print(f"Database IntegrityError in add_invoice_header for invoice '{header_data.get('invoice_no')}': {ie}")
+        if conn:
+            conn.rollback()
+        return "DUPLICATE"
     except sqlite3.OperationalError as e_op:
-        print(f"Database connection error in add_invoice_header: {e_op}")
+        print(f"Database OperationalError in add_invoice_header: {e_op}")
         return False
     except sqlite3.Error as e:
-        print(f"Database error in add_invoice_header: {e}")
+        print(f"Generic Database Error in add_invoice_header: {e}")
         if conn:
             conn.rollback()
         return False
@@ -292,11 +297,55 @@ def delete_line_items_for_invoice(invoice_no: str) -> bool:
         if conn:
             conn.close()
 
+def get_last_invoice_no() -> str | None:
+    """
+    Fetches the last (highest) invoice number from the invoice_headers table.
+    Tries to cast invoice_no to INTEGER for numeric comparison first.
+    If that fails (e.g., non-numeric prefixes), it falls back to lexicographical MAX.
+    """
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        # Primary attempt: Cast to integer to get true numerical max
+        cursor.execute("SELECT MAX(CAST(invoice_no AS INTEGER)) FROM invoice_headers")
+        result = cursor.fetchone()
+        if result and result[0] is not None:
+            return str(result[0])
+        # If table is empty or all invoice_no are non-castable, result[0] might be None
+        # Fall through to lexicographical sort in this case as well.
+        raise sqlite3.OperationalError # Trigger fallback explicitly if no numeric max found
+    except sqlite3.OperationalError:
+        # Fallback: Try lexicographical max if cast fails or returned None
+        # This works best for zero-padded numbers or consistent prefix alphanumeric strings
+        print(f"Warning: Could not determine last invoice number by numeric cast. Trying lexicographical MAX.")
+        try:
+            if conn: # conn might be None if connect itself failed initially
+                cursor = conn.cursor() # Reuse cursor if conn is still valid
+            else:
+                conn = sqlite3.connect(DB_NAME) # Need a new connection if previous failed
+                cursor = conn.cursor()
+
+            cursor.execute("SELECT MAX(invoice_no) FROM invoice_headers WHERE LENGTH(invoice_no) > 0") # Ensure not empty string
+            result = cursor.fetchone()
+            if result and result[0] is not None:
+                return str(result[0])
+            return None # No invoices found at all
+        except sqlite3.Error as e_fallback:
+            print(f"Fallback DB error in get_last_invoice_no: {e_fallback}")
+            return None
+    except sqlite3.Error as e: # Catch other potential sqlite3 errors from primary attempt
+        print(f"DB error in get_last_invoice_no (primary attempt): {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
 if __name__ == '__main__':
     # Basic Test for database functions
     # Ensure database_utils.init_db() has been run to create tables.
     # from database_utils import init_db # You would uncomment and use this if DB_NAME was from database_utils
-    # init_db() # Make sure tables are created by running database_utils.py or uncommenting this
+    # init_db()
     print("Running basic tests for billing_db.py...")
 
     # Setup test data
@@ -394,4 +443,56 @@ if __name__ == '__main__':
 
     # Clean up remaining test data
     delete_invoice_header(INV_KEEP_TEST_002)
+
+    print("\n--- Testing get_last_invoice_no ---")
+    # Ensure table is empty for first test of get_last_invoice_no
+    # Note: This is a bit destructive for other tests if run in isolation without full setup/teardown.
+    # For a real test suite, manage data carefully.
+    print("Deleting all headers for get_last_invoice_no empty test...")
+    all_inv = get_all_invoice_headers()
+    for h in all_inv:
+        delete_line_items_for_invoice(h['invoice_no']) # Clear line items first due to FK if any
+        delete_invoice_header(h['invoice_no'])
+
+    last_inv = get_last_invoice_no()
+    print(f"Last invoice_no (empty table): {last_inv}, Expected: None")
+    if last_inv is None:
+        print("SUCCESS: get_last_invoice_no on empty table.")
+    else:
+        print("FAILED: get_last_invoice_no on empty table.")
+
+    add_invoice_header({'invoice_no': '1', 'date': '2023-01-01', 'customer_name': 'Test 1'})
+    last_inv = get_last_invoice_no()
+    print(f"Last invoice_no (after '1'): {last_inv}, Expected: 1")
+    if last_inv == '1': print("SUCCESS") else: print("FAILED")
+
+    add_invoice_header({'invoice_no': '002', 'date': '2023-01-02', 'customer_name': 'Test 2'})
+    last_inv = get_last_invoice_no()
+    print(f"Last invoice_no (after '002'): {last_inv}, Expected: 2 (due to CAST)") # CAST makes it 2, not "002"
+    if last_inv == '2': print("SUCCESS") else: print("FAILED")
+
+    add_invoice_header({'invoice_no': '10', 'date': '2023-01-03', 'customer_name': 'Test 3'})
+    last_inv = get_last_invoice_no()
+    print(f"Last invoice_no (after '10'): {last_inv}, Expected: 10")
+    if last_inv == '10': print("SUCCESS") else: print("FAILED")
+
+    add_invoice_header({'invoice_no': 'INV005', 'date': '2023-01-04', 'customer_name': 'Test INV'})
+    last_inv = get_last_invoice_no() # This will use lexicographical due to "INV"
+    print(f"Last invoice_no (after 'INV005'): {last_inv}, Expected: INV005 (lexicographical due to fallback)")
+    if last_inv == 'INV005': print("SUCCESS") else: print("FAILED")
+
+    add_invoice_header({'invoice_no': '100', 'date': '2023-01-05', 'customer_name': 'Test 100'})
+    last_inv = get_last_invoice_no() # Numeric cast should work here and be > INV005 lexicographically
+    print(f"Last invoice_no (after '100'): {last_inv}, Expected: 100 (numeric cast should override INV005)")
+    if last_inv == '100': print("SUCCESS") else: print("FAILED")
+
+
+    # Clean up after tests
+    delete_invoice_header('1')
+    delete_invoice_header('002') # Will try to delete '2' due to cast, might fail if '2' doesn't exist
+    delete_invoice_header('2')   # Explicitly delete '2'
+    delete_invoice_header('10')
+    delete_invoice_header('INV005')
+    delete_invoice_header('100')
+
     print("\nBilling_db.py testing finished.")
