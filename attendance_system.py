@@ -208,6 +208,9 @@ class AttendancePage(tk.Frame):
 
     def _load_attendance_for_date(self):
         print("_load_attendance_for_date started.")
+
+        self._create_worker_rows() # Rebuild worker rows with fresh data
+
         date_str = self.date_var.get()
         print(f"Date string: {date_str}")
         try:
