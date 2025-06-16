@@ -52,7 +52,10 @@ def init_db():
             customer_name TEXT NOT NULL,
             total_amount REAL, -- This will be sum of line items
             gst_percentage REAL,
-            payment_method TEXT
+            payment_method TEXT,
+            grn_date_from TEXT,
+            grn_date_to TEXT,
+            po_number TEXT -- New column
         )
     """)
     conn.commit()

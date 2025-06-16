@@ -12,7 +12,8 @@ def add_invoice_header(header_data: dict) -> bool:
     Args:
         header_data (dict): A dictionary containing invoice header details.
                             Expected keys: 'invoice_no', 'date', 'customer_name',
-                                           'total_amount', 'gst_percentage', 'payment_method'.
+                                           'total_amount', 'gst_percentage', 'payment_method',
+                                           'grn_date_from', 'grn_date_to', 'po_number'.
     Returns:
         bool: True if the record was added successfully, False otherwise.
     """
@@ -20,10 +21,15 @@ def add_invoice_header(header_data: dict) -> bool:
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO invoice_headers (invoice_no, date, customer_name, total_amount, gst_percentage, payment_method)
-            VALUES (:invoice_no, :date, :customer_name, :total_amount, :gst_percentage, :payment_method)
-        """, header_data)
+        columns = ['invoice_no', 'date', 'customer_name', 'total_amount',
+                   'gst_percentage', 'payment_method', 'grn_date_from', 'grn_date_to', 'po_number']
+
+        data_for_insert = {col: header_data.get(col) for col in columns}
+
+        cursor.execute(f"""
+            INSERT INTO invoice_headers ({', '.join(columns)})
+            VALUES (:{', :'.join(columns)})
+        """, data_for_insert)
         conn.commit()
         return True
     except sqlite3.OperationalError as e_op:
@@ -129,7 +135,7 @@ def get_all_invoice_headers(invoice_no_filter: str = None) -> list:
 
         params = []
         sql_query = """
-            SELECT invoice_no, date, customer_name, total_amount, gst_percentage, payment_method
+            SELECT invoice_no, date, customer_name, total_amount, gst_percentage, payment_method, grn_date_from, grn_date_to, po_number
             FROM invoice_headers
         """
 
@@ -297,7 +303,8 @@ if __name__ == '__main__':
     INV_EDIT_TEST = 'INV_EDIT_TEST_001'
     add_invoice_header({
         'invoice_no': INV_EDIT_TEST, 'date': '2024-07-01', 'customer_name': 'Edit Test Initial',
-        'total_amount': 100.0, 'gst_percentage': 10.0, 'payment_method': 'Cash'
+        'total_amount': 100.0, 'gst_percentage': 10.0, 'payment_method': 'Cash',
+        'grn_date_from': '2024-06-01', 'grn_date_to': '2024-06-15', 'po_number': 'PO123'
     })
     add_invoice_line_items_batch([
         {'invoice_no': INV_EDIT_TEST, 'line_no': 1, 'item_description': 'Item A', 'part_no': 'P1', 'hsn_code': 'H1', 'quantity': 1, 'rate': 50, 'amount': 50},
@@ -319,11 +326,22 @@ if __name__ == '__main__':
         print(f"FAILED: Could not find line items or incorrect count for {INV_EDIT_TEST}. Found: {items}")
 
     print(f"\n--- Testing update_invoice_header ({INV_EDIT_TEST}) ---")
-    update_data = {'customer_name': 'Edit Test Updated', 'total_amount': 120.0}
+    update_data = {
+        'customer_name': 'Edit Test Updated',
+        'total_amount': 120.0,
+        'grn_date_from': '2024-06-20',
+        'grn_date_to': None,
+        'po_number': 'PO456Updated'
+    }
     if update_invoice_header(INV_EDIT_TEST, update_data):
         print(f"SUCCESS: Updated header {INV_EDIT_TEST}.")
         updated_header = get_invoice_header_by_no(INV_EDIT_TEST)
-        if updated_header and updated_header['customer_name'] == 'Edit Test Updated' and updated_header['total_amount'] == 120.0:
+        if updated_header and \
+           updated_header['customer_name'] == 'Edit Test Updated' and \
+           updated_header['total_amount'] == 120.0 and \
+           updated_header['grn_date_from'] == '2024-06-20' and \
+           updated_header['grn_date_to'] is None and \
+           updated_header['po_number'] == 'PO456Updated':
             print(f"VERIFIED: Update successful. New data: {updated_header}")
         else:
             print(f"VERIFICATION FAILED for update. Current data: {updated_header}")
@@ -347,15 +365,17 @@ if __name__ == '__main__':
     # Previous tests (slightly refactored for clarity)
     add_invoice_header({
         'invoice_no': 'INV_DEL_TEST_001', 'date': '2024-01-01', 'customer_name': 'To Be Deleted',
-        'total_amount': 10.0, 'gst_percentage': 1.0, 'payment_method': 'N/A'
+        'total_amount': 10.0, 'gst_percentage': 1.0, 'payment_method': 'N/A',
+        'grn_date_from': '2023-12-01', 'grn_date_to': '2023-12-05', 'po_number': 'PO789'
     })
     INV_KEEP_TEST_002 = 'INV_KEEP_TEST_002'
     add_invoice_header({
         'invoice_no': INV_KEEP_TEST_002, 'date': '2024-01-02', 'customer_name': 'To Be Kept',
-        'total_amount': 20.0, 'gst_percentage': 2.0, 'payment_method': 'Cash'
+        'total_amount': 20.0, 'gst_percentage': 2.0, 'payment_method': 'Cash',
+        'grn_date_from': '2023-12-10', 'grn_date_to': '2023-12-15', 'po_number': 'POABC'
     })
 
-    print("\n--- Testing get_all_invoice_headers (no filter) ---")
+    print("\n--- Testing get_all_invoice_headers (no filter, should include GRN and PO numbers) ---")
     all_headers_no_filter = get_all_invoice_headers()
     print(f"Retrieved {len(all_headers_no_filter)} invoice headers initially.")
 
