@@ -30,6 +30,8 @@ class AttendancePage(tk.Frame):
         Args:
             master: The parent tkinter widget.
         """
+        print("AttendancePage __init__ started.")
+        print(f"Master widget: {master}")
         super().__init__(master)
         self.configure(bg="white")
         self.worker_widgets = [] # List to store dictionaries of widgets for each worker row
@@ -81,6 +83,7 @@ class AttendancePage(tk.Frame):
         # --- Initial Data Load ---
         self._create_worker_rows() # Create the UI structure for worker rows
         self._load_attendance_for_date() # Populate these rows with data for the default date
+        print("AttendancePage __init__ finished.")
 
     def _on_canvas_configure(self, event):
         """Adjusts the width of the item inside the canvas to match the canvas width."""
@@ -92,15 +95,21 @@ class AttendancePage(tk.Frame):
         Each row includes labels for worker name, radio buttons for status,
         and entry fields for punch-in/out times.
         """
+        print("_create_worker_rows started.")
         # Clear any existing widgets from previous loads
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
         self.worker_widgets = [] # Reset the list of worker widget references
 
         workers = attendance_db.get_all_active_workers_for_attendance()
+        print(f"Workers fetched: {workers}")
+        print(f"Number of workers found: {len(workers)}")
         if not workers:
             # If no workers are found, display a message.
-            ttk.Label(self.scrollable_frame, text="No workers found. Please add workers in Worker Management.", padding=10).pack()
+            no_workers_message = "No workers found. Please add workers in Worker Management."
+            ttk.Label(self.scrollable_frame, text=no_workers_message, padding=10).pack()
+            print(no_workers_message)
+            print("_create_worker_rows finished.")
             return
 
         # --- Header Row for the worker list ---
@@ -170,7 +179,9 @@ class AttendancePage(tk.Frame):
 
 
     def _load_attendance_for_date(self):
+        print("_load_attendance_for_date started.")
         date_str = self.date_var.get()
+        print(f"Date string: {date_str}")
         try:
             # Validate date format (basic)
             datetime.strptime(date_str, "%Y-%m-%d")
@@ -188,10 +199,12 @@ class AttendancePage(tk.Frame):
             # Potentially show a message in the UI if scrollable_frame is empty
             if not self.scrollable_frame.winfo_children():
                  ttk.Label(self.scrollable_frame, text="No workers found to load attendance for.", padding=10).pack()
+            print("_load_attendance_for_date finished.") # Added here as it's an early exit
             return
 
-
+        print(f"Processing worker_widgets: {len(self.worker_widgets)} widgets.")
         existing_records = attendance_db.get_attendance_records(date_str)
+        print(f"Existing records: {existing_records}")
 
         for worker_row in self.worker_widgets:
             worker_id = worker_row['worker_id']
@@ -209,6 +222,8 @@ class AttendancePage(tk.Frame):
 
             # Trigger the trace to set initial state of time entries
             worker_row['status_var'].trace_notify_now()
+        print("_create_worker_rows finished.") # This was misplaced in the previous diff, should be at the end of _create_worker_rows
+        print("_load_attendance_for_date finished.")
 
 
     def _validate_time_format(self, time_str):
@@ -274,6 +289,7 @@ class AttendancePage(tk.Frame):
         else:
             messagebox.showerror("Save Error", f"Failed to save attendance for {date_str}.")
 
+print("AttendancePage class definition loaded.")
 if __name__ == '__main__':
     # For testing purposes
     # Ensure database_utils.init_db() has run once to create tables

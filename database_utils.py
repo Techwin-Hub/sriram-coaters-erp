@@ -44,6 +44,37 @@ def init_db():
     """)
     conn.commit()
 
+    # 5. Create invoice_headers table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS invoice_headers (
+            invoice_no TEXT PRIMARY KEY,
+            date TEXT NOT NULL,
+            customer_name TEXT NOT NULL,
+            total_amount REAL, -- This will be sum of line items
+            gst_percentage REAL,
+            payment_method TEXT
+        )
+    """)
+    conn.commit()
+
+    # 6. Create invoice_line_items table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS invoice_line_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_no TEXT NOT NULL,
+            line_no INTEGER NOT NULL, -- e.g., 1, 2, 3 for each item in an invoice
+            item_description TEXT,
+            part_no TEXT,
+            hsn_code TEXT,
+            quantity REAL NOT NULL,
+            rate REAL NOT NULL,
+            amount REAL NOT NULL, -- quantity * rate
+            FOREIGN KEY (invoice_no) REFERENCES invoice_headers(invoice_no) ON DELETE CASCADE,
+            UNIQUE (invoice_no, line_no) -- Ensures line numbers are unique within an invoice
+        )
+    """)
+    conn.commit()
+
     # 2. Create workers table
     # This table must be created before 'attendance' and 'overtime' tables
     # due to foreign key constraints in those tables referencing 'workers.id'.

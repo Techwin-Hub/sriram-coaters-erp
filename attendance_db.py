@@ -24,19 +24,24 @@ def get_all_active_workers_for_attendance():
               'first_name', and 'last_name' of a worker.
               Returns an empty list if no workers are found or an error occurs.
     """
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row  # Access columns by name for easy dict conversion
-    cursor = conn.cursor()
+    conn = None  # Initialize conn to None
     try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row  # Access columns by name for easy dict conversion
+        cursor = conn.cursor()
         # SQL query to select necessary worker details.
         cursor.execute("SELECT id, first_name, last_name FROM workers ORDER BY first_name, last_name")
         workers = [dict(row) for row in cursor.fetchall()] # Convert each row to a dictionary
         return workers
+    except sqlite3.OperationalError as e_op:
+        print(f"Database connection error in get_all_active_workers_for_attendance: {e_op}")
+        return []
     except sqlite3.Error as e:
         print(f"Database error in get_all_active_workers_for_attendance: {e}")
         return [] # Return an empty list in case of error
     finally:
-        conn.close() # Ensure the database connection is always closed
+        if conn:
+            conn.close() # Ensure the database connection is always closed
 
 def get_attendance_records(date_str):
     """
@@ -50,11 +55,12 @@ def get_attendance_records(date_str):
               (status, punch_in_time, punch_out_time) for the given date.
               Returns an empty dictionary if no records are found or an error occurs.
     """
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row # To access columns by name
-    cursor = conn.cursor()
+    conn = None  # Initialize conn to None
     records = {} # Initialize an empty dictionary to store results
     try:
+        conn = sqlite3.connect(DB_NAME)
+        conn.row_factory = sqlite3.Row # To access columns by name
+        cursor = conn.cursor()
         # SQL query to get attendance details for the specified date.
         cursor.execute("""
             SELECT worker_id, status, punch_in_time, punch_out_time
@@ -69,11 +75,15 @@ def get_attendance_records(date_str):
                 'punch_out_time': row['punch_out_time']
             }
         return records
+    except sqlite3.OperationalError as e_op:
+        print(f"Database connection error in get_attendance_records for date {date_str}: {e_op}")
+        return {}
     except sqlite3.Error as e:
         print(f"Database error in get_attendance_records for date {date_str}: {e}")
         return {} # Return empty dict on error
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def save_attendance_records(records_to_save):
     """
@@ -90,9 +100,10 @@ def save_attendance_records(records_to_save):
     Returns:
         bool: True if all records were saved successfully, False otherwise.
     """
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    conn = None  # Initialize conn to None
     try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
         # SQL query for batch insert or update (upsert).
         # :named_placeholders are used, matching keys in the dictionaries.
         cursor.executemany("""
@@ -105,12 +116,19 @@ def save_attendance_records(records_to_save):
         """, records_to_save)
         conn.commit() # Commit the transaction
         return True
+    except sqlite3.OperationalError as e_op:
+        print(f"Database connection error in save_attendance_records: {e_op}")
+        if conn: # Attempt rollback only if connection was established
+            conn.rollback()
+        return False
     except sqlite3.Error as e:
         print(f"Database error in save_attendance_records: {e}")
-        conn.rollback() # Rollback changes if any error occurs during the transaction
+        if conn: # Attempt rollback only if connection was established
+            conn.rollback() # Rollback changes if any error occurs during the transaction
         return False
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 if __name__ == '__main__':
     # This block is for testing the functions in this module when run directly.
