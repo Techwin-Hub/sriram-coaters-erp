@@ -103,15 +103,24 @@ class AttendancePage(tk.Frame):
 
         workers = attendance_db.get_all_active_workers_for_attendance()
         print(f"Workers fetched: {workers}")
-        print(f"Number of workers found: {len(workers)}")
-        if not workers:
-            # If no workers are found, display a message.
+
+        if workers is None:
+            # Database error occurred
+            error_message = "Error loading worker data. Please try again or check application logs."
+            ttk.Label(self.scrollable_frame, text=error_message, padding=10, foreground="red").pack()
+            print(f"ERROR: _create_worker_rows - {error_message}")
+            print("_create_worker_rows finished due to database error.")
+            return
+        elif not workers:
+            # No workers found (empty list)
+            print(f"Number of workers found: 0")
             no_workers_message = "No workers found. Please add workers in Worker Management."
             ttk.Label(self.scrollable_frame, text=no_workers_message, padding=10).pack()
             print(no_workers_message)
-            print("_create_worker_rows finished.")
+            print("_create_worker_rows finished as no workers were found.")
             return
 
+        print(f"Number of workers found: {len(workers)}")
         # --- Header Row for the worker list ---
         header_frame = ttk.Frame(self.scrollable_frame, padding=(0,0,0,5))
         header_frame.pack(fill="x", expand=True)

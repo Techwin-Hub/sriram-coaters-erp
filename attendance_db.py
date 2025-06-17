@@ -35,10 +35,10 @@ def get_all_active_workers_for_attendance():
         return workers
     except sqlite3.OperationalError as e_op:
         print(f"Database connection error in get_all_active_workers_for_attendance: {e_op}")
-        return []
+        return None
     except sqlite3.Error as e:
         print(f"Database error in get_all_active_workers_for_attendance: {e}")
-        return [] # Return an empty list in case of error
+        return None # Return None in case of error
     finally:
         if conn:
             conn.close() # Ensure the database connection is always closed
