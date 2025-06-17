@@ -464,27 +464,32 @@ if __name__ == '__main__':
     add_invoice_header({'invoice_no': '1', 'date': '2023-01-01', 'customer_name': 'Test 1'})
     last_inv = get_last_invoice_no()
     print(f"Last invoice_no (after '1'): {last_inv}, Expected: 1")
-    if last_inv == '1': print("SUCCESS") else: print("FAILED")
+    if last_inv == '1': print("SUCCESS") 
+    else: print("FAILED")
 
     add_invoice_header({'invoice_no': '002', 'date': '2023-01-02', 'customer_name': 'Test 2'})
     last_inv = get_last_invoice_no()
     print(f"Last invoice_no (after '002'): {last_inv}, Expected: 2 (due to CAST)") # CAST makes it 2, not "002"
-    if last_inv == '2': print("SUCCESS") else: print("FAILED")
+    if last_inv == '2': print("SUCCESS") 
+    else: print("FAILED")
 
     add_invoice_header({'invoice_no': '10', 'date': '2023-01-03', 'customer_name': 'Test 3'})
     last_inv = get_last_invoice_no()
     print(f"Last invoice_no (after '10'): {last_inv}, Expected: 10")
-    if last_inv == '10': print("SUCCESS") else: print("FAILED")
+    if last_inv == '10': print("SUCCESS") 
+    else: print("FAILED")
 
     add_invoice_header({'invoice_no': 'INV005', 'date': '2023-01-04', 'customer_name': 'Test INV'})
     last_inv = get_last_invoice_no() # This will use lexicographical due to "INV"
     print(f"Last invoice_no (after 'INV005'): {last_inv}, Expected: INV005 (lexicographical due to fallback)")
-    if last_inv == 'INV005': print("SUCCESS") else: print("FAILED")
+    if last_inv == 'INV005': print("SUCCESS") 
+    else: print("FAILED")
 
     add_invoice_header({'invoice_no': '100', 'date': '2023-01-05', 'customer_name': 'Test 100'})
     last_inv = get_last_invoice_no() # Numeric cast should work here and be > INV005 lexicographically
     print(f"Last invoice_no (after '100'): {last_inv}, Expected: 100 (numeric cast should override INV005)")
-    if last_inv == '100': print("SUCCESS") else: print("FAILED")
+    if last_inv == '100': print("SUCCESS") 
+    else: print("FAILED")
 
 
     # Clean up after tests
